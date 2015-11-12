@@ -30,22 +30,46 @@ class FileNode extends SimpleNode {
     file = new File(filePath);
     configs[r"$type"] = "string";
 
-    if (await file.exists()) {
-      updateValue(await file.readAsString());
-    }
-
     link.addNode("${path}/remove", {
       r"$name": "Remove",
       r"$is": "remove",
       r"$invokable": "write"
     });
-
-    sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
-      if (event.type == FileSystemEvent.MODIFY || event.type == FileSystemEvent.CREATE) {
-        updateValue(await file.readAsString());
-      }
-    });
   }
+
+  @override
+  onSubscribe() {
+    subs++;
+    checkSubscriptions();
+  }
+
+  @override
+  onUnsubscribe() {
+    subs--;
+    checkSubscriptions();
+  }
+
+  checkSubscriptions() async {
+    if (subs < 0) {
+      subs = 0;
+    }
+
+    if (subs == 0) {
+      if (sub != null) {
+        sub.cancel();
+      }
+      clearValue();
+    } else {
+      updateValue(await file.readAsString());
+      sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
+        if (event.type == FileSystemEvent.MODIFY || event.type == FileSystemEvent.CREATE) {
+          updateValue(await file.readAsString());
+        }
+      });
+    }
+  }
+
+  int subs = 0;
 
   @override
   Map save() {
