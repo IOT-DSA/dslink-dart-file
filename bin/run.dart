@@ -2,6 +2,8 @@ import "dart:async";
 import "dart:convert";
 import "dart:io";
 
+import "dart:typed_data";
+
 import "package:dslink/dslink.dart";
 import "package:dslink/nodes.dart";
 import "package:crypto/crypto.dart";
@@ -18,6 +20,8 @@ class FileNode extends SimpleNode {
 
   FileNode(String path) : super(path);
 
+  bool isBinary = false;
+
   @override
   onCreated() async {
     var filePath = attributes["@filePath"];
@@ -25,6 +29,10 @@ class FileNode extends SimpleNode {
     if (filePath == null) {
       link.removeNode(path);
       return;
+    }
+
+    if (attributes["@fileBinary"] == true) {
+      isBinary = true;
     }
 
     file = new File(filePath);
@@ -60,12 +68,28 @@ class FileNode extends SimpleNode {
       }
       clearValue();
     } else {
-      updateValue(await file.readAsString());
+      await loadValue();
       sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
         if (event.type == FileSystemEvent.MODIFY || event.type == FileSystemEvent.CREATE) {
-          updateValue(await file.readAsString());
+          await loadValue();
         }
       });
+    }
+  }
+
+  loadValue() async {
+    if (isBinary) {
+      Uint8List list;
+      List<int> bytes = await file.readAsBytes();
+      if (bytes is Uint8List) {
+        list = bytes;
+      } else {
+        list = new Uint8List.fromList(bytes);
+      }
+
+      updateValue(list.buffer.asByteData());
+    } else {
+      updateValue(await file.readAsString());
     }
   }
 
@@ -93,11 +117,16 @@ main(List<String> args) async {
     "addFile": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) async {
       var rn = params["name"];
       var fp = params["filePath"];
+      var isBinary = params["binary"];
       if (rn == null || rn is! String || rn.isEmpty) {
         return {
           "success": false,
           "message": "Name not specified."
         };
+      }
+
+      if (isBinary is! bool) {
+        isBinary = false;
       }
 
       if (fp == null || fp is! String || fp.isEmpty) {
@@ -119,7 +148,8 @@ main(List<String> args) async {
       link.addNode(tname, {
         r"$is": "file",
         r"$name": rn,
-        "@filePath": fp
+        "@filePath": fp,
+        "@fileBinary": isBinary
       });
 
       link.save();
@@ -148,6 +178,11 @@ main(List<String> args) async {
         "name": "filePath",
         "type": "string",
         "description": "File Path"
+      },
+      {
+        "name": "binary",
+        "type": "bool",
+        "description": "Load as Binary"
       }
     ],
     r"$result": "values",
