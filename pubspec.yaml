@@ -1,0 +1,6 @@
+name: dslink_file
+description: File DSLink
+version: 1.0.0
+dependencies:
+  dslink:
+    git: https://github.com/IOT-DSA/sdk-dslink-dart.git
