@@ -69,15 +69,30 @@ class FileNode extends SimpleNode {
       clearValue();
     } else {
       await loadValue();
-      sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
-        if (event.type == FileSystemEvent.MODIFY || event.type == FileSystemEvent.CREATE) {
-          await loadValue();
-        }
-      });
+      await subscribeToWatcher();
     }
   }
 
+  subscribeToWatcher() async {
+    if (sub != null) {
+      sub.cancel();
+    }
+
+    sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
+      await loadValue();
+
+      if (event.type == FileSystemEvent.DELETE) {
+        await subscribeToWatcher();
+      }
+    });
+  }
+
   loadValue() async {
+    if (!(await file.exists())) {
+      updateValue(null);
+      return;
+    }
+
     if (isBinary) {
       Uint8List list;
       List<int> bytes = await file.readAsBytes();
