@@ -78,34 +78,45 @@ class FileNode extends SimpleNode {
       sub.cancel();
     }
 
-    sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
-      await loadValue();
+    try {
+      sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
+        await loadValue();
 
-      if (event.type == FileSystemEvent.DELETE) {
-        await subscribeToWatcher();
-      }
-    });
+        if (event.type == FileSystemEvent.DELETE) {
+          await subscribeToWatcher();
+        }
+      });
+    } catch (e) {
+      new Future.delayed(const Duration(seconds: 1), subscribeToWatcher);
+    }
   }
 
   loadValue() async {
-    if (!(await file.exists())) {
-      updateValue(null);
-      return;
-    }
-
-    if (isBinary) {
-      Uint8List list;
-      List<int> bytes = await file.readAsBytes();
-      if (bytes is Uint8List) {
-        list = bytes;
-      } else {
-        list = new Uint8List.fromList(bytes);
+    try {
+      if (!(await file.exists())) {
+        updateValue(null);
+        return;
       }
 
-      updateValue(list.buffer.asByteData());
-    } else {
-      updateValue(await file.readAsString());
-    }
+      if (isBinary) {
+        Uint8List list;
+        List<int> bytes = await file.readAsBytes();
+        if (bytes is Uint8List) {
+          list = bytes;
+        } else {
+          list = new Uint8List.fromList(bytes);
+        }
+
+        updateValue(list.buffer.asByteData());
+      } else {
+        try {
+          updateValue(await file.readAsString());
+        } on FormatException catch (_) {
+          var bytes = await file.readAsBytes();
+          updateValue(CryptoUtils.bytesToBase64(bytes));
+        }
+      }
+    } catch (e) {}
   }
 
   int subs = 0;
@@ -114,7 +125,7 @@ class FileNode extends SimpleNode {
   Map save() {
     var m = super.save();
     m.remove("?value");
-    m.remove("Remove");
+    m.remove("remove");
     return m;
   }
 
@@ -151,12 +162,12 @@ main(List<String> args) async {
         };
       }
 
-      var tname = "/${hashString(rn)}";
+      var tname = "/${Uri.encodeComponent(rn)}";
       var node = link.provider.getNode(tname);
       if (node != null && node.disconnected == null) {
         return {
           "success": false,
-          "message": "File with name '${tname}' already exists."
+          "message": "Entity with name '${tname}' already exists."
         };
       }
 
@@ -175,7 +186,9 @@ main(List<String> args) async {
       };
     }),
     "remove": (String path) =>
-      new DeleteActionNode.forParent(path, link.provider as MutableNodeProvider)
+      new DeleteActionNode.forParent(path, link.provider as MutableNodeProvider, onDelete: () {
+        link.save();
+      })
   }, autoInitialize: false);
 
   link.init();
