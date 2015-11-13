@@ -153,85 +153,100 @@ class GroupNode extends SimpleNode {
   }
 }
 
+class AddFileNode extends SimpleNode {
+  AddFileNode(String path) : super(path);
+
+  @override
+  onInvoke(Map<String, dynamic> params) async {
+    var rn = params["name"];
+    var p = new Path(path);
+    var fp = params["filePath"];
+    var isBinary = params["binary"];
+    if (rn == null || rn is! String || rn.isEmpty) {
+      return {
+        "success": false,
+        "message": "Name not specified."
+      };
+    }
+
+    if (isBinary is! bool) {
+      isBinary = false;
+    }
+
+    if (fp == null || fp is! String || fp.isEmpty) {
+      return {
+        "success": false,
+        "message": "File path not specified."
+      };
+    }
+
+    var tname = "${p.parentPath}/${Uri.encodeComponent(rn)}";
+    if (tname.startsWith("//")) tname.substring(1);
+    var node = link.provider.getNode(tname);
+    if (node != null && node.disconnected == null) {
+      return {
+        "success": false,
+        "message": "Entity with name '${tname}' already exists."
+      };
+    }
+
+    link.addNode(tname, {
+      r"$is": "file",
+      r"$name": rn,
+      "@filePath": fp,
+      "@fileBinary": isBinary
+    });
+
+    link.save();
+
+    return {
+      "success": true,
+      "message": "Success."
+    };
+  }
+}
+
+class AddGroupNode extends SimpleNode {
+  AddGroupNode(String path) : super(path);
+
+  @override
+  onInvoke(Map<String, dynamic> params) async {
+    var p = new Path(path);
+    var pp = p.parentPath;
+    var name = params["name"];
+
+    if (name == null) {
+      throw new Exception("name does not exist.");
+    }
+
+    var ep = "${pp}/${Uri.encodeComponent(name)}";
+    if (ep.startsWith("//")) ep.substring(1);
+
+    if (link.getNode(ep) != null) {
+      return throw new Exception("Entity with name '${name}' already exists.");
+    }
+
+    link.addNode(ep, {
+      r"$is": "group",
+      r"$name": name,
+      "addFile": ADD_FILE_ACTION
+    });
+
+    link.save();
+  }
+}
+
 main(List<String> args) async {
   link = new LinkProvider(args, "File-", profiles: {
     "file": (String path) => new FileNode(path),
-    "addFile": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) async {
-      var rn = params["name"];
-      var p = new Path(path);
-      var fp = params["filePath"];
-      var isBinary = params["binary"];
-      if (rn == null || rn is! String || rn.isEmpty) {
-        return {
-          "success": false,
-          "message": "Name not specified."
-        };
-      }
-
-      if (isBinary is! bool) {
-        isBinary = false;
-      }
-
-      if (fp == null || fp is! String || fp.isEmpty) {
-        return {
-          "success": false,
-          "message": "File path not specified."
-        };
-      }
-
-      var tname = "${p.parentPath}/${Uri.encodeComponent(rn)}";
-      if (tname.startsWith("//")) tname.substring(1);
-      var node = link.provider.getNode(tname);
-      if (node != null && node.disconnected == null) {
-        return {
-          "success": false,
-          "message": "Entity with name '${tname}' already exists."
-        };
-      }
-
-      link.addNode(tname, {
-        r"$is": "file",
-        r"$name": rn,
-        "@filePath": fp,
-        "@fileBinary": isBinary
-      });
-
-      link.save();
-
-      return {
-        "success": true,
-        "message": "Success."
-      };
-    }),
-    "remove": (String path) =>
-      new DeleteActionNode.forParent(path, link.provider as MutableNodeProvider, onDelete: () {
+    "addFile": (String path) => new AddFileNode(path),
+    "remove": (String path) {
+      return new DeleteActionNode.forParent(path, link.provider as MutableNodeProvider, onDelete: () {
         link.save();
-      }),
-    "group": (String path) => new GroupNode(path),
-    "addGroup": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) async {
-      var p = new Path(path);
-      var pp = p.parentPath;
-      var name = params["name"];
-
-      if (name == null) {
-        throw new Exception("name does not exist.");
-      }
-
-      var ep = "${pp}/${Uri.encodeComponent(name)}";
-      if (ep.startsWith("//")) ep.substring(1);
-
-      if (link.getNode(ep) != null) {
-        return throw new Exception("Entity with name '${name}' already exists.");
-      }
-
-      link.addNode(ep, {
-        r"$is": "group",
-        r"$name": name,
-        "addFile": ADD_FILE_ACTION
       });
-
-      link.save();
-    })
+    },
+    "group": (String path) => new GroupNode(path),
+    "addGroup": (String path) => new AddGroupNode(path)
   }, autoInitialize: false);
 
   link.init();
