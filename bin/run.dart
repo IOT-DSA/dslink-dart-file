@@ -38,11 +38,7 @@ class FileNode extends SimpleNode {
     file = new File(filePath);
     configs[r"$type"] = "string";
 
-    link.addNode("${path}/remove", {
-      r"$name": "Remove",
-      r"$is": "remove",
-      r"$invokable": "write"
-    });
+    link.addNode("${path}/remove", REMOVE_ACTION);
   }
 
   @override
@@ -137,11 +133,32 @@ class FileNode extends SimpleNode {
   }
 }
 
+class GroupNode extends SimpleNode {
+  GroupNode(String path) : super(path);
+
+  @override
+  onCreated() {
+    link.addNode("${path}/addFile", ADD_FILE_ACTION);
+    link.addNode("${path}/addGroup", ADD_GROUP_ACTION);
+    link.addNode("${path}/remove", REMOVE_ACTION);
+  }
+
+  @override
+  Map save() {
+    var m = super.save();
+    m.remove("addFile");
+    m.remove("addGroup");
+    m.remove("remove");
+    return m;
+  }
+}
+
 main(List<String> args) async {
   link = new LinkProvider(args, "File-", profiles: {
     "file": (String path) => new FileNode(path),
     "addFile": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) async {
       var rn = params["name"];
+      var p = new Path(path);
       var fp = params["filePath"];
       var isBinary = params["binary"];
       if (rn == null || rn is! String || rn.isEmpty) {
@@ -162,7 +179,8 @@ main(List<String> args) async {
         };
       }
 
-      var tname = "/${Uri.encodeComponent(rn)}";
+      var tname = "${p.parentPath}/${Uri.encodeComponent(rn)}";
+      if (tname.startsWith("//")) tname.substring(1);
       var node = link.provider.getNode(tname);
       if (node != null && node.disconnected == null) {
         return {
@@ -188,46 +206,95 @@ main(List<String> args) async {
     "remove": (String path) =>
       new DeleteActionNode.forParent(path, link.provider as MutableNodeProvider, onDelete: () {
         link.save();
-      })
+      }),
+    "group": (String path) => new GroupNode(path),
+    "addGroup": (String path) => new SimpleActionNode(path, (Map<String, dynamic> params) async {
+      var p = new Path(path);
+      var pp = p.parentPath;
+      var name = params["name"];
+
+      if (name == null) {
+        throw new Exception("name does not exist.");
+      }
+
+      var ep = "${pp}/${Uri.encodeComponent(name)}";
+      if (ep.startsWith("//")) ep.substring(1);
+
+      if (link.getNode(ep) != null) {
+        return throw new Exception("Entity with name '${name}' already exists.");
+      }
+
+      link.addNode(ep, {
+        r"$is": "group",
+        r"$name": name,
+        "addFile": ADD_FILE_ACTION
+      });
+
+      link.save();
+    })
   }, autoInitialize: false);
 
   link.init();
 
-  SimpleNode addFileNode = link.addNode("/addFile", {
-    r"$is": "addFile",
-    r"$name": "Add File",
-    r"$params": [
-      {
-        "name": "name",
-        "type": "string",
-        "description": "File Name"
-      },
-      {
-        "name": "filePath",
-        "type": "string",
-        "description": "File Path"
-      },
-      {
-        "name": "binary",
-        "type": "bool",
-        "description": "Load as Binary"
-      }
-    ],
-    r"$result": "values",
-    r"$invokable": "write",
-    r"$columns": [
-      {
-        "name": "success",
-        "type": "bool"
-      },
-      {
-        "name": "message",
-        "type": "string"
-      }
-    ]
-  });
-
+  SimpleNode addFileNode = link.addNode("/addFile", ADD_FILE_ACTION);
   addFileNode.serializable = false;
+
+  SimpleNode addGroupNode = link.addNode("/addGroup", ADD_GROUP_ACTION);
+  addGroupNode.serializable = false;
 
   link.connect();
 }
+
+final Map ADD_FILE_ACTION = {
+  r"$is": "addFile",
+  r"$name": "Add File",
+  r"$params": [
+    {
+      "name": "name",
+      "type": "string",
+      "description": "File Name"
+    },
+    {
+      "name": "filePath",
+      "type": "string",
+      "description": "File Path"
+    },
+    {
+      "name": "binary",
+      "type": "bool",
+      "description": "Load as Binary"
+    }
+  ],
+  r"$result": "values",
+  r"$invokable": "write",
+  r"$columns": [
+    {
+      "name": "success",
+      "type": "bool"
+    },
+    {
+      "name": "message",
+      "type": "string"
+    }
+  ]
+};
+
+final Map ADD_GROUP_ACTION = {
+  r"$is": "addGroup",
+  r"$name": "Add Group",
+  r"$params": [
+    {
+      "name": "name",
+      "type": "string",
+      "description": "File Name"
+    }
+  ],
+  r"$result": "values",
+  r"$invokable": "write"
+};
+
+final Map REMOVE_ACTION = {
+  r"$name": "Remove",
+  r"$is": "remove",
+  r"$invokable": "write"
+};
