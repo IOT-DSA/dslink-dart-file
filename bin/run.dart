@@ -298,7 +298,7 @@ class AddHttpUrlNode extends SimpleNode {
     var pr = params["pollRate"];
 
     if (pr == null) {
-      pr = 1;
+      pr = 5000;
     }
 
     if (pr is! num) {
@@ -409,7 +409,7 @@ class HttpNode extends SimpleNode {
     var rate = attributes[r"@httpPollRate"];
 
     if (rate == null) {
-      rate = 1000;
+      rate = 1;
     }
 
     if (rate is num && rate is! int) {
@@ -421,7 +421,7 @@ class HttpNode extends SimpleNode {
       return;
     }
 
-    pollRate = new Duration(milliseconds: rate);
+    pollRate = new Duration(milliseconds: (rate * 1000).toInt());
 
     if (attributes["@httpBinary"] == true) {
       isBinary = true;
