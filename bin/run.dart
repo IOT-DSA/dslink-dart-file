@@ -8,6 +8,8 @@ import "package:dslink/dslink.dart";
 import "package:dslink/nodes.dart";
 import "package:crypto/crypto.dart";
 
+import "package:watcher/watcher.dart";
+
 LinkProvider link;
 
 String hashString(String input) => CryptoUtils.bytesToHex((
@@ -26,6 +28,12 @@ class FileNode extends SimpleNode {
 
   @override
   onCreated() async {
+    gp(a) {
+      var ep = path + "/" + a;
+      if (ep.startsWith("//")) ep = ep.substring(1);
+      return ep;
+    }
+
     configs[r"$writable"] = "write";
     var filePath = attributes["@filePath"];
 
@@ -41,11 +49,13 @@ class FileNode extends SimpleNode {
     file = new File(filePath);
     configs[r"$type"] = isBinary ? "binary" : "string";
 
-    link.addNode("${path}/remove", REMOVE_ACTION);
+    link.addNode(gp("remove"), REMOVE_ACTION);
 
     if (!fileNodes.contains(this)) {
       fileNodes.add(this);
     }
+
+    updateList(r"$is");
   }
 
   @override
@@ -82,10 +92,14 @@ class FileNode extends SimpleNode {
     }
 
     try {
-      sub = file.watch(events: FileSystemEvent.ALL).listen((FileSystemEvent event) async {
+      if (watcher == null) {
+        watcher = new FileWatcher(file.path);
+      }
+
+      sub = watcher.events.listen((WatchEvent event) async {
         await loadValue();
 
-        if (event.type == FileSystemEvent.DELETE) {
+        if (event.type == ChangeType.REMOVE) {
           await subscribeToWatcher();
         }
       });
@@ -182,6 +196,7 @@ class FileNode extends SimpleNode {
   }
 
   dynamic data;
+  FileWatcher watcher;
 }
 
 class GroupNode extends SimpleNode {
@@ -189,9 +204,16 @@ class GroupNode extends SimpleNode {
 
   @override
   onCreated() {
-    link.addNode("${path}/addFile", ADD_FILE_ACTION);
-    link.addNode("${path}/addGroup", ADD_GROUP_ACTION);
-    link.addNode("${path}/remove", REMOVE_ACTION);
+    gp(a) {
+      var ep = path + "/" + a;
+      if (ep.startsWith("//")) ep.substring(1);
+      return ep;
+    }
+    link.addNode(gp("addFile"), ADD_FILE_ACTION);
+    link.addNode(gp("addGroup"), ADD_GROUP_ACTION);
+    link.addNode(gp("remove"), REMOVE_ACTION);
+
+    updateList(r"$is");
   }
 
   @override
@@ -232,7 +254,7 @@ class AddFileNode extends SimpleNode {
     }
 
     var tname = "${p.parentPath}/${Uri.encodeComponent(rn)}";
-    if (tname.startsWith("//")) tname.substring(1);
+    if (tname.startsWith("//")) tname = tname.substring(1);
     var node = link.provider.getNode(tname);
     if (node != null && node.disconnected == null) {
       return {
@@ -241,12 +263,16 @@ class AddFileNode extends SimpleNode {
       };
     }
 
-    link.addNode(tname, {
+    SimpleNode n = link.addNode(tname, {
       r"$is": "file",
       r"$name": rn,
       "@filePath": fp,
       "@fileBinary": isBinary
     });
+
+    if (!n.children.containsKey("remove")) {
+      n.onCreated();
+    }
 
     link.save();
 
@@ -271,17 +297,20 @@ class AddGroupNode extends SimpleNode {
     }
 
     var ep = "${pp}/${Uri.encodeComponent(name)}";
-    if (ep.startsWith("//")) ep.substring(1);
+    if (ep.startsWith("//")) ep = ep.substring(1);
 
     if (link.getNode(ep) != null) {
       return throw new Exception("Entity with name '${name}' already exists.");
     }
 
-    link.addNode(ep, {
+    SimpleNode n = link.addNode(ep, {
       r"$is": "group",
-      r"$name": name,
-      "addFile": ADD_FILE_ACTION
+      r"$name": name
     });
+
+    if (!n.children.containsKey("addFile")) {
+      n.onCreated();
+    }
 
     link.save();
   }
