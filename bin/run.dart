@@ -14,6 +14,8 @@ String hashString(String input) => CryptoUtils.bytesToHex((
     new SHA1()..add(UTF8.encode(input))
 ).close());
 
+List<FileNode> fileNodes = [];
+
 class FileNode extends SimpleNode {
   File file;
   StreamSubscription sub;
@@ -24,6 +26,7 @@ class FileNode extends SimpleNode {
 
   @override
   onCreated() async {
+    configs[r"$writable"] = "write";
     var filePath = attributes["@filePath"];
 
     if (filePath == null) {
@@ -39,6 +42,10 @@ class FileNode extends SimpleNode {
     configs[r"$type"] = "string";
 
     link.addNode("${path}/remove", REMOVE_ACTION);
+
+    if (!fileNodes.contains(this)) {
+      fileNodes.add(this);
+    }
   }
 
   @override
@@ -130,7 +137,51 @@ class FileNode extends SimpleNode {
     if (sub != null) {
       sub.cancel();
     }
+
+    fileNodes.remove(this);
   }
+
+  bool needsToWrite = false;
+
+  @override
+  onSetValue(Object val) {
+    if (isBinary) {
+      if (val is String) {
+        val = const Utf8Encoder().convert(val);
+        data = val;
+        needsToWrite = true;
+        return true;
+      }
+
+      if (val is! ByteData) {
+        return true;
+      }
+    } else {
+      if (val is ByteData) {
+        try {
+          val = const Utf8Decoder().convert(
+              (val as ByteData).buffer.asUint8List()
+          );
+          data = val;
+          needsToWrite = true;
+        } catch (e) {}
+        return true;
+      }
+
+      if (val is! String) {
+        val = val.toString();
+        data = val;
+        needsToWrite = true;
+        return true;
+      }
+    }
+
+    needsToWrite = true;
+    data = val;
+    return true;
+  }
+
+  dynamic data;
 }
 
 class GroupNode extends SimpleNode {
@@ -257,8 +308,41 @@ main(List<String> args) async {
   SimpleNode addGroupNode = link.addNode("/addGroup", ADD_GROUP_ACTION);
   addGroupNode.serializable = false;
 
+  var isLooping = false;
+
+  timer = Scheduler.every(Interval.TWO_MILLISECONDS, () async {
+    if (isLooping) {
+      return;
+    }
+    isLooping = true;
+    for (var x in fileNodes) {
+      try {
+        if (!x.needsToWrite) {
+          continue;
+        }
+
+        if (x.data is ByteData) {
+          x.data = (x.data as ByteData).buffer.asUint8List();
+        }
+
+        var val = x.data;
+        x.needsToWrite = false;
+        x.data = null;
+
+        if (val is String) {
+          await x.file.writeAsString(val);
+        } else if (val is List) {
+          await x.file.writeAsBytes(val);
+        }
+      } catch (e) {}
+    }
+    isLooping = false;
+  });
+
   link.connect();
 }
+
+Timer timer;
 
 final Map ADD_FILE_ACTION = {
   r"$is": "addFile",
