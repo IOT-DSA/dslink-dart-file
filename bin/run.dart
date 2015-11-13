@@ -39,7 +39,7 @@ class FileNode extends SimpleNode {
     }
 
     file = new File(filePath);
-    configs[r"$type"] = "string";
+    configs[r"$type"] = isBinary ? "binary" : "string";
 
     link.addNode("${path}/remove", REMOVE_ACTION);
 
