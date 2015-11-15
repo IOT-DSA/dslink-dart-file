@@ -30,7 +30,7 @@ class FileNode extends SimpleNode {
   bool isBinary = false;
 
   @override
-  onCreated() async {
+  onCreated() {
     gp(a) {
       var ep = path + "/" + a;
       if (ep.startsWith("//")) ep = ep.substring(1);
@@ -53,6 +53,10 @@ class FileNode extends SimpleNode {
     configs[r"$type"] = isBinary ? "binary" : "string";
 
     link.addNode(gp("remove"), REMOVE_ACTION);
+
+    if (isBinary) {
+      link.addNode(gp("readBinaryData"), READ_BINARY_DATA);
+    }
 
     if (!fileNodes.contains(this)) {
       fileNodes.add(this);
@@ -147,6 +151,7 @@ class FileNode extends SimpleNode {
     var m = super.save();
     m.remove("?value");
     m.remove("remove");
+    m.remove("readBinaryData");
     return m;
   }
 
@@ -509,13 +514,33 @@ class HttpNode extends SimpleNode {
   Duration pollRate;
   int subs = 0;
 
-
   @override
   Map save() {
     var m = super.save();
     m.remove("?value");
     m.remove("remove");
     return m;
+  }
+}
+
+class ReadyBinaryDataNode extends SimpleNode {
+  ReadyBinaryDataNode(String path) : super(path);
+
+  @override
+  onInvoke(Map<String, dynamic> params) {
+    Path p = new Path(path);
+    FileNode node = provider.getNode(p.parentPath);
+    if (node == null || node is! FileNode) {
+      throw new Exception("Invalid File Node!");
+    }
+
+    return node.file.openRead().map((data) {
+      return [
+        {
+          "chunk": ByteDataUtil.fromUint8List(ByteDataUtil.list2Uint8List(data))
+        }
+      ];
+    });
   }
 }
 
@@ -533,7 +558,8 @@ main(List<String> args) async {
     "group": (String path) => new GroupNode(path),
     "addGroup": (String path) => new AddGroupNode(path),
     "http": (String path) => new HttpNode(path),
-    "addHttpUrl": (String path) => new AddHttpUrlNode(path)
+    "addHttpUrl": (String path) => new AddHttpUrlNode(path),
+    "readBinaryData": (String path) => new ReadyBinaryDataNode(path)
   }, autoInitialize: false);
 
   link.init();
@@ -690,4 +716,18 @@ final Map REMOVE_ACTION = {
   r"$name": "Remove",
   r"$is": "remove",
   r"$invokable": "write"
+};
+
+final Map READ_BINARY_DATA = {
+  r"$is": "readBinaryData",
+  r"$name": "Read Binary Data",
+  r"$params": [],
+  r"$result": "stream",
+  r"$invokable": "read",
+  r"$columns": [
+    {
+      "name": "chunk",
+      "type": "binary"
+    }
+  ]
 };
