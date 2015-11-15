@@ -123,6 +123,11 @@ class FileNode extends SimpleNode {
         return;
       }
 
+      var lastModified = await file.lastModified();
+
+      String ts;
+      ts = "${lastModified.toIso8601String()}${ValueUpdate.TIME_ZONE}";
+
       if (isBinary) {
         Uint8List list;
         List<int> bytes = await file.readAsBytes();
@@ -132,13 +137,16 @@ class FileNode extends SimpleNode {
           list = new Uint8List.fromList(bytes);
         }
 
-        updateValue(list.buffer.asByteData());
+        var update = new ValueUpdate(list.buffer.asByteData(), ts: ts);
+        updateValue(update);
       } else {
         try {
-          updateValue(await file.readAsString());
+          var update = new ValueUpdate(await file.readAsString(), ts: ts);
+          updateValue(update);
         } on FormatException catch (_) {
           var bytes = await file.readAsBytes();
-          updateValue(CryptoUtils.bytesToBase64(bytes));
+          var update = new ValueUpdate(CryptoUtils.bytesToBase64(bytes), ts: ts);
+          updateValue(update);
         }
       }
     } catch (e) {}
