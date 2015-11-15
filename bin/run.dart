@@ -10,6 +10,7 @@ import "package:crypto/crypto.dart";
 
 import "package:watcher/watcher.dart";
 import "package:http/http.dart" as http;
+import "package:watcher/src/resubscribable.dart";
 
 LinkProvider link;
 
@@ -94,9 +95,10 @@ class FileNode extends SimpleNode {
     }
 
     try {
-      if (watcher == null) {
-        watcher = new FileWatcher(file.path);
+      if (watcher is ManuallyClosedWatcher) {
+        (watcher as ManuallyClosedWatcher).close();
       }
+      watcher = new FileWatcher(file.path);
 
       sub = watcher.events.listen((WatchEvent event) async {
         await loadValue();
@@ -450,10 +452,19 @@ class HttpNode extends SimpleNode {
         throw new Exception("Status Code: ${response.statusCode}");
       }
 
+      dynamic val;
+
       if (isBinary) {
-        updateValue(response.bodyBytes.buffer.asByteData());
+        val = response.bodyBytes.buffer.asByteData();
       } else {
-        updateValue(response.body);
+        val = response.body;
+      }
+
+      var hash = hashData(val);
+
+      if (_lastHash != hash) {
+        updateValue(val);
+        _lastHash = hash;
       }
 
       lastUpdate = new DateTime.now();
@@ -462,6 +473,18 @@ class HttpNode extends SimpleNode {
     }
 
     _isUpdating = false;
+  }
+
+  String _lastHash;
+
+  dynamic hashData(input) {
+    var sha = new SHA1();
+    if (input is ByteData) {
+      sha.add(input.buffer.asUint8List());
+    } else {
+      sha.add(const Utf8Encoder().convert(input.toString()));
+    }
+    return CryptoUtils.bytesToHex(sha.close());
   }
 
   bool _isUpdating = false;
@@ -485,6 +508,15 @@ class HttpNode extends SimpleNode {
   DateTime lastUpdate = new DateTime.fromMillisecondsSinceEpoch(0);
   Duration pollRate;
   int subs = 0;
+
+
+  @override
+  Map save() {
+    var m = super.save();
+    m.remove("?value");
+    m.remove("remove");
+    return m;
+  }
 }
 
 http.Client httpClient = new http.Client();
