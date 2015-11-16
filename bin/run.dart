@@ -14,6 +14,8 @@ import "package:watcher/watcher.dart";
 import "package:http/http.dart" as http;
 import "package:watcher/src/resubscribable.dart";
 
+import "package:mime/mime.dart";
+
 LinkProvider link;
 
 String hashString(String input) => CryptoUtils.bytesToHex((
@@ -33,7 +35,7 @@ class FileNode extends SimpleNode {
   bool subscribeToValue = true;
 
   @override
-  onCreated() {
+  onCreated() async {
     gp(a) {
       var ep = path + "/" + a;
       if (ep.startsWith("//")) ep = ep.substring(1);
@@ -76,9 +78,16 @@ class FileNode extends SimpleNode {
       "@unit": "bytes"
     });
 
+    link.addNode("${path}/type", {
+      r"$name": "Content Type",
+      r"$type": "string"
+    });
+
     updateList(r"$is");
 
-    updateFileSize();
+    try {
+      await updateFileSize();
+    } catch (e) {}
   }
 
   @override
@@ -138,16 +147,22 @@ class FileNode extends SimpleNode {
   }
 
   loadValue() async {
-    updateFileSize();
-
-    if (!subscribeToValue) {
-      updateValue(new ValueUpdate(null, ts: ValueUpdate.getTs()), force: true);
-      return;
-    }
-
     try {
       if (!(await file.exists())) {
         updateValue(null);
+        return;
+      }
+
+      await updateFileSize();
+
+      if (!subscribeToValue) {
+        SimpleNode typeNode = link.getNode("${path}/type");
+        String mime = lookupMimeType(file.path);
+        if (mime == null || mime.isEmpty) {
+          mime = "application/octet-bytes";
+        }
+        typeNode.updateValue(mime);
+        updateValue(new ValueUpdate(null, ts: ValueUpdate.getTs()), force: true);
         return;
       }
 
@@ -165,14 +180,34 @@ class FileNode extends SimpleNode {
           list = new Uint8List.fromList(bytes);
         }
 
+        SimpleNode typeNode = link.getNode("${path}/type");
+        String mime = lookupMimeType(file.path, headerBytes: list);
+        if (mime == null || mime.isEmpty) {
+          mime = "application/octet-bytes";
+        }
+        typeNode.updateValue(mime);
+
         var update = new ValueUpdate(list.buffer.asByteData(), ts: ts);
         updateValue(update);
       } else {
         try {
-          var update = new ValueUpdate(await file.readAsString(), ts: ts);
+          var content = await file.readAsString();
+          SimpleNode typeNode = link.getNode("${path}/type");
+          String mime = lookupMimeType(file.path, headerBytes: const Utf8Encoder().convert(content));
+          if (mime == null || mime.isEmpty) {
+            mime = "application/octet-bytes";
+          }
+          typeNode.updateValue(mime);
+          var update = new ValueUpdate(content, ts: ts);
           updateValue(update);
         } on FormatException catch (_) {
           var bytes = await file.readAsBytes();
+          SimpleNode typeNode = link.getNode("${path}/type");
+          String mime = lookupMimeType(file.path, headerBytes: bytes);
+          if (mime == null || mime.isEmpty) {
+            mime = "application/octet-bytes";
+          }
+          typeNode.updateValue(mime);
           var update = new ValueUpdate(CryptoUtils.bytesToBase64(bytes), ts: ts);
           updateValue(update);
         }
