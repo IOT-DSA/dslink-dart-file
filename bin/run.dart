@@ -5,7 +5,9 @@ import "dart:io";
 import "dart:typed_data";
 
 import "package:dslink/dslink.dart";
+import "package:dslink/utils.dart";
 import "package:dslink/nodes.dart";
+
 import "package:crypto/crypto.dart";
 
 import "package:watcher/watcher.dart";
@@ -28,6 +30,7 @@ class FileNode extends SimpleNode {
   FileNode(String path) : super(path);
 
   bool isBinary = false;
+  bool subscribeToValue = true;
 
   @override
   onCreated() {
@@ -49,6 +52,10 @@ class FileNode extends SimpleNode {
       isBinary = true;
     }
 
+    if (attributes["@fileSubscribe"] == false) {
+      subscribeToValue = false;
+    }
+
     file = new File(filePath);
     configs[r"$type"] = isBinary ? "binary" : "string";
 
@@ -56,13 +63,22 @@ class FileNode extends SimpleNode {
 
     if (isBinary) {
       link.addNode(gp("readBinaryData"), READ_BINARY_DATA);
+      link.addNode(gp("readBinaryChunk"), READ_BINARY_CHUNK);
     }
 
     if (!fileNodes.contains(this)) {
       fileNodes.add(this);
     }
 
+    link.addNode("${path}/size", {
+      r"$name": "Size",
+      r"$type": "number",
+      "@unit": "bytes"
+    });
+
     updateList(r"$is");
+
+    updateFileSize();
   }
 
   @override
@@ -116,7 +132,19 @@ class FileNode extends SimpleNode {
     }
   }
 
+  updateFileSize() async {
+    SimpleNode sizeNode = children["size"];
+    sizeNode.updateValue(await file.length());
+  }
+
   loadValue() async {
+    updateFileSize();
+
+    if (!subscribeToValue) {
+      updateValue(new ValueUpdate(null, ts: ValueUpdate.getTs()), force: true);
+      return;
+    }
+
     try {
       if (!(await file.exists())) {
         updateValue(null);
@@ -160,6 +188,7 @@ class FileNode extends SimpleNode {
     m.remove("?value");
     m.remove("remove");
     m.remove("readBinaryData");
+    m.remove("readBinaryChunk");
     return m;
   }
 
@@ -254,6 +283,7 @@ class AddFileNode extends SimpleNode {
     var p = new Path(path);
     var fp = params["filePath"];
     var isBinary = params["binary"];
+    var subs = params["subscribe"];
     if (rn == null || rn is! String || rn.isEmpty) {
       return {
         "success": false,
@@ -263,6 +293,10 @@ class AddFileNode extends SimpleNode {
 
     if (isBinary is! bool) {
       isBinary = false;
+    }
+
+    if (subs is! bool) {
+      subs = true;
     }
 
     if (fp == null || fp is! String || fp.isEmpty) {
@@ -286,7 +320,8 @@ class AddFileNode extends SimpleNode {
       r"$is": "file",
       r"$name": rn,
       "@filePath": fp,
-      "@fileBinary": isBinary
+      "@fileBinary": isBinary,
+      "@fileSubscribe": subs
     });
 
     if (!n.children.containsKey("remove")) {
@@ -531,8 +566,52 @@ class HttpNode extends SimpleNode {
   }
 }
 
-class ReadyBinaryDataNode extends SimpleNode {
-  ReadyBinaryDataNode(String path) : super(path);
+class ReadBinaryChunkNode extends SimpleNode {
+  ReadBinaryChunkNode(String path) : super(path);
+
+  @override
+  onInvoke(Map<String, dynamic> params) async {
+    int start = int.parse(params["start"].toString(), onError: (s) => null);
+    int end = int.parse(params["end"].toString(), onError: (s) => null);
+
+    if (start == null || start < 0) {
+      start = 0;
+    }
+
+    Path p = new Path(path);
+    FileNode node = provider.getNode(p.parentPath);
+    if (node == null || node is! FileNode) {
+      throw new Exception("Invalid File Node!");
+    }
+
+    var file = node.file;
+    if (end == null || end < 0) {
+      end = await file.length();
+    }
+
+    Uint8List data = await file.openRead(start, end).reduce((Uint8List a, Uint8List b) {
+      var list = new Uint8List(a.length + b.length);
+      var c = 0;
+      for (var byte in a) {
+        list[c] = byte;
+        c++;
+      }
+
+      for (var byte in b) {
+        list[c] = byte;
+        c++;
+      }
+      return list;
+    });
+
+    return {
+      "data": data.buffer.asByteData()
+    };
+  }
+}
+
+class ReadBinaryDataNode extends SimpleNode {
+  ReadBinaryDataNode(String path) : super(path);
 
   @override
   onInvoke(Map<String, dynamic> params) {
@@ -567,7 +646,8 @@ main(List<String> args) async {
     "addGroup": (String path) => new AddGroupNode(path),
     "http": (String path) => new HttpNode(path),
     "addHttpUrl": (String path) => new AddHttpUrlNode(path),
-    "readBinaryData": (String path) => new ReadyBinaryDataNode(path)
+    "readBinaryData": (String path) => new ReadBinaryDataNode(path),
+    "readBinaryChunk": (String path) => new ReadBinaryChunkNode(path)
   }, autoInitialize: false);
 
   link.init();
@@ -650,6 +730,12 @@ final Map ADD_FILE_ACTION = {
       "name": "binary",
       "type": "bool",
       "description": "Load as Binary"
+    },
+    {
+      "name": "subscribe",
+      "type": "bool",
+      "default": true,
+      "description": "Allow Subscribing to File Content"
     }
   ],
   r"$result": "values",
@@ -735,6 +821,30 @@ final Map READ_BINARY_DATA = {
   r"$columns": [
     {
       "name": "chunk",
+      "type": "binary"
+    }
+  ]
+};
+
+final Map READ_BINARY_CHUNK = {
+  r"$is": "readBinaryChunk",
+  r"$name": "Read Binary Chunk",
+  r"$params": [
+    {
+      "name": "start",
+      "type": "int",
+      "default": 0
+    },
+    {
+      "name": "end",
+      "type": "int"
+    }
+  ],
+  r"$result": "values",
+  r"$invokable": "read",
+  r"$columns": [
+    {
+      "name": "data",
       "type": "binary"
     }
   ]
