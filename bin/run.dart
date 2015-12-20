@@ -546,6 +546,35 @@ class HttpNode extends SimpleNode {
       var hash = hashData(val);
 
       if (_lastHash != hash) {
+        if (val is String) {
+          try {
+            var json = const JsonDecoder().convert(val);
+            if (json is Map || json is List) {
+              val = json;
+            }
+          } catch (e) {}
+        }
+
+        var oldType = configs[r"$type"];
+        var newType = "";
+
+        if (val is Map) {
+          newType = "map";
+        } else if (val is List) {
+          newType = "array";
+        } else if (val is String) {
+          newType = "string";
+        } else if (val is ByteData) {
+          newType = "binary";
+        } else {
+          newType = "dynamic";
+        }
+
+        if (oldType != newType) {
+          configs[r"$type"] = newType;
+          updateList(r"$type");
+        }
+
         updateValue(val);
         _lastHash = hash;
       }
